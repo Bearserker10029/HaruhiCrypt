@@ -169,16 +169,19 @@ impl eframe::App for HaruhiCryptApp {
                     AnimState::Processing => egui::Color32::from_rgb(255, 200, 100),
                     AnimState::Done => egui::Color32::from_rgb(100, 255, 150),
                 };
-                if self.status != "Ready" {
-                    ui.label(egui::RichText::new(format!("● {}", self.status)).color(status_color).small());
-                }
+                let status_text = match self.anim_state {
+                    AnimState::Idle => "⚡ Ready".to_string(),
+                    AnimState::Processing => format!("⚙️ {}", self.status),
+                    AnimState::Done => "✅ Done!".to_string(),
+                };
+                ui.label(egui::RichText::new(status_text).color(status_color).small());
 
                 ui.add_space(5.0);
                 ui.label(egui::RichText::new("Encryption based on the Haruhi Problem").weak());
                 ui.add_space(10.0);
 
                 if let (Some(base_texture), Some(working_texture)) = (&self.haruhi_texture, &self.haruhi_working_texture) {
-                    let image_size = if is_dark { 200.0 } else { 300.0 };
+                    let image_size = if is_dark { 250.0 } else { 380.0 };
                     let sized = egui::load::SizedTexture::from_handle(if is_dark { working_texture } else { base_texture });
                     let image = egui::Image::from_texture(sized).fit_to_exact_size([image_size, image_size].into());
                     ui.add(image);
@@ -194,192 +197,202 @@ impl eframe::App for HaruhiCryptApp {
 
             ui.add_space(15.0);
 
-            ui.vertical_centered(|ui| {
-            ui.group(|ui| {
-                ui.strong("🔑 Key");
-                ui.add_space(5.0);
-                ui.horizontal(|ui| {
-                    ui.text_edit_singleline(&mut self.key);
-                    if ui.button("🎲 Generate").clicked() {
-                        self.generate_random_key();
-                    }
-                });
-                ui.add_space(3.0);
-                ui.label(egui::RichText::new("16 bytes hex key (e.g., 0123-4567-89ab-cdef)").weak());
-            });
-
-            ui.add_space(10.0);
-
-            ui.group(|ui| {
-                ui.strong("📁 Files");
-                ui.add_space(5.0);
-
-                ui.label("Input File:");
-                ui.horizontal(|ui| {
-                    ui.text_edit_singleline(&mut self.file_path);
-                    if ui.button("📂 Browse").clicked() {
-                        if let Some(path) = rfd::FileDialog::new().pick_file() {
-                            self.file_path = path.to_string_lossy().to_string();
-                            self.log(&format!("File selected: {}", self.file_path));
-                        }
-                    }
-                });
-
-                ui.add_space(8.0);
-
-                ui.label("Output Folder:");
-                ui.horizontal(|ui| {
-                    ui.text_edit_singleline(&mut self.output_folder);
-                    if ui.button("📂 Browse").clicked() {
-                        if let Some(path) = rfd::FileDialog::new().pick_folder() {
-                            self.output_folder = path.to_string_lossy().to_string();
-                            self.log(&format!("Output folder: {}", self.output_folder));
-                        }
-                    }
-                });
-                if !output_folder_valid && !self.output_folder.is_empty() {
-                    ui.label(egui::RichText::new("⚠️ Invalid folder").color(egui::Color32::RED).small());
-                } else if self.output_folder.is_empty() {
-                    ui.label(egui::RichText::new("⚠️ Output folder is required").color(egui::Color32::RED).small());
-                }
-            });
-
-            ui.add_space(10.0);
-
             ui.horizontal(|ui| {
-                let encrypt_btn = egui::Button::new(egui::RichText::new("🔒 ENCRYPT").color(egui::Color32::WHITE)).fill(egui::Color32::from_rgb(155, 89, 182));
-                let decrypt_btn = egui::Button::new(egui::RichText::new("🔓 DECRYPT").color(egui::Color32::WHITE)).fill(egui::Color32::from_rgb(26, 188, 156));
-
-                let encrypt_btn = ui.add_enabled(can_encrypt, encrypt_btn);
-                let decrypt_btn = ui.add_enabled(can_decrypt, decrypt_btn);
-
-                if encrypt_btn.clicked() {
-                    let file_path = self.file_path.clone();
-                    let output_folder = self.output_folder.clone();
-                    let (base_path, original_ext) = {
-                        let path = std::path::Path::new(&file_path);
-                        let base = path.file_stem().and_then(|s| s.to_str()).unwrap_or(&file_path);
-                        let ext = path.extension().and_then(|e| e.to_str()).map(|s| s.to_string());
-                        (base.to_string(), ext)
-                    };
-                    let key = self.key.clone();
-                    let (tx, rx) = mpsc::channel();
-                    self.progress_rx = rx;
-                    self.progress = 0.0;
-                    self.bytes_processed = 0;
-                    self.anim_state = AnimState::Processing;
-
-                    thread::spawn(move || {
-                        tx.send(Progress::Log("Starting encryption...".to_string())).ok();
-                        tx.send(Progress::Percent(0.1)).ok();
-
-                        let data = match std::fs::read(&file_path) {
-                            Ok(d) => { tx.send(Progress::Bytes(d.len())).ok(); d }
-                            Err(e) => {
-                                tx.send(Progress::Error(e.to_string())).ok();
-                                return;
+                ui.vertical(|ui| {
+                    ui.group(|ui| {
+                        ui.strong("🔑 Key");
+                        ui.add_space(5.0);
+                        ui.horizontal(|ui| {
+                            ui.text_edit_singleline(&mut self.key);
+                            if ui.button("🎲 Generate").clicked() {
+                                self.generate_random_key();
                             }
-                        };
-
-                        tx.send(Progress::Log(format!("Read {} bytes", data.len()))).ok();
-                        tx.send(Progress::Percent(0.3)).ok();
-
-                        let encrypted = haruhi::encrypt_data(&key, &data, original_ext.as_deref());
-                        tx.send(Progress::Log("Data encrypted".to_string())).ok();
-                        tx.send(Progress::Percent(0.8)).ok();
-
-                        let file_name = format!("{}.haruhi", base_path);
-                        let output_path = std::path::Path::new(&output_folder).join(file_name).to_string_lossy().to_string();
-
-                        if let Err(e) = std::fs::write(&output_path, &encrypted) {
-                            tx.send(Progress::Error(e.to_string())).ok();
-                            return;
-                        }
-                        tx.send(Progress::Done(output_path)).ok();
+                        });
+                        ui.add_space(3.0);
+                        ui.label(egui::RichText::new("16 bytes hex key (e.g., 0123-4567-89ab-cdef)").weak());
                     });
-                }
 
-                ui.add_space(10.0);
+                    ui.add_space(10.0);
 
-                if decrypt_btn.clicked() {
-                    let file_path = self.file_path.clone();
-                    let output_folder = self.output_folder.clone();
-                    let key = self.key.clone();
-                    let (tx, rx) = mpsc::channel();
-                    self.progress_rx = rx;
-                    self.progress = 0.0;
-                    self.bytes_processed = 0;
-                    self.anim_state = AnimState::Processing;
+                    ui.group(|ui| {
+                        ui.strong("📁 Files");
+                        ui.add_space(5.0);
 
-                    thread::spawn(move || {
-                        tx.send(Progress::Log("Starting decryption...".to_string())).ok();
-                        tx.send(Progress::Percent(0.1)).ok();
-
-                        let data = match std::fs::read(&file_path) {
-                            Ok(d) => { tx.send(Progress::Bytes(d.len())).ok(); d }
-                            Err(e) => {
-                                tx.send(Progress::Error(e.to_string())).ok();
-                                return;
+                        ui.label("Input File:");
+                        ui.horizontal(|ui| {
+                            ui.text_edit_singleline(&mut self.file_path);
+                            if ui.button("📂 Browse").clicked() {
+                                if let Some(path) = rfd::FileDialog::new().pick_file() {
+                                    self.file_path = path.to_string_lossy().to_string();
+                                    self.log(&format!("File selected: {}", self.file_path));
+                                }
                             }
-                        };
+                        });
 
-                        tx.send(Progress::Log(format!("Read {} bytes", data.len()))).ok();
-                        tx.send(Progress::Percent(0.3)).ok();
+                        ui.add_space(8.0);
 
-                        match haruhi::decrypt_data(&key, &data) {
-                            Ok((decrypted, ext)) => {
-                                tx.send(Progress::Log("Data decrypted".to_string())).ok();
-                                tx.send(Progress::Percent(0.8)).ok();
-                                let base_name = if file_path.ends_with(".haruhi") {
-                                    std::path::Path::new(&file_path)
-                                        .file_stem()
-                                        .and_then(|s| s.to_str())
-                                        .unwrap_or("output")
-                                        .to_string()
-                                } else {
-                                    "output".to_string()
+                        ui.label("Output Folder:");
+                        ui.horizontal(|ui| {
+                            ui.text_edit_singleline(&mut self.output_folder);
+                            if ui.button("📂 Browse").clicked() {
+                                if let Some(path) = rfd::FileDialog::new().pick_folder() {
+                                    self.output_folder = path.to_string_lossy().to_string();
+                                    self.log(&format!("Output folder: {}", self.output_folder));
+                                }
+                            }
+                        });
+                        if !output_folder_valid && !self.output_folder.is_empty() {
+                            ui.label(egui::RichText::new("⚠️ Invalid folder").color(egui::Color32::RED).small());
+                        } else if self.output_folder.is_empty() {
+                            ui.label(egui::RichText::new("⚠️ Output folder is required").color(egui::Color32::RED).small());
+                        }
+                    });
+                });
+
+                ui.add_space(30.0);
+
+                ui.vertical(|ui| {
+                    ui.add_space(40.0);
+
+                    ui.horizontal(|ui| {
+                        ui.add_space((ui.available_width() - 220.0) / 2.0);
+                        
+                        let encrypt_btn = egui::Button::new(egui::RichText::new("🔒 ENCRYPT").color(egui::Color32::WHITE)).fill(egui::Color32::from_rgb(155, 89, 182)).min_size(egui::vec2(100.0, 32.0));
+                        let decrypt_btn = egui::Button::new(egui::RichText::new("🔓 DECRYPT").color(egui::Color32::WHITE)).fill(egui::Color32::from_rgb(26, 188, 156)).min_size(egui::vec2(100.0, 32.0));
+
+                        let encrypt_btn = ui.add_enabled(can_encrypt, encrypt_btn);
+                        let decrypt_btn = ui.add_enabled(can_decrypt, decrypt_btn);
+
+                        if encrypt_btn.clicked() {
+                            let file_path = self.file_path.clone();
+                            let output_folder = self.output_folder.clone();
+                            let (base_path, original_ext) = {
+                                let path = std::path::Path::new(&file_path);
+                                let base = path.file_stem().and_then(|s| s.to_str()).unwrap_or(&file_path);
+                                let ext = path.extension().and_then(|e| e.to_str()).map(|s| s.to_string());
+                                (base.to_string(), ext)
+                            };
+                            let key = self.key.clone();
+                            let (tx, rx) = mpsc::channel();
+                            self.progress_rx = rx;
+                            self.progress = 0.0;
+                            self.bytes_processed = 0;
+                            self.anim_state = AnimState::Processing;
+
+                            thread::spawn(move || {
+                                tx.send(Progress::Log("Starting encryption...".to_string())).ok();
+                                tx.send(Progress::Percent(0.1)).ok();
+
+                                let data = match std::fs::read(&file_path) {
+                                    Ok(d) => { tx.send(Progress::Bytes(d.len())).ok(); d }
+                                    Err(e) => {
+                                        tx.send(Progress::Error(e.to_string())).ok();
+                                        return;
+                                    }
                                 };
-                                let file_name = format!("{}.{}", base_name, ext);
+
+                                tx.send(Progress::Log(format!("Read {} bytes", data.len()))).ok();
+                                tx.send(Progress::Percent(0.3)).ok();
+
+                                let encrypted = haruhi::encrypt_data(&key, &data, original_ext.as_deref());
+                                tx.send(Progress::Log("Data encrypted".to_string())).ok();
+                                tx.send(Progress::Percent(0.8)).ok();
+
+                                let file_name = format!("{}.haruhi", base_path);
                                 let output_path = std::path::Path::new(&output_folder).join(file_name).to_string_lossy().to_string();
 
-                                if let Err(e) = std::fs::write(&output_path, &decrypted) {
+                                if let Err(e) = std::fs::write(&output_path, &encrypted) {
                                     tx.send(Progress::Error(e.to_string())).ok();
                                     return;
                                 }
                                 tx.send(Progress::Done(output_path)).ok();
-                            },
-                            Err(e) => {
-                                tx.send(Progress::Error(e)).ok();
-                            }
+                            });
+                        }
+
+                        ui.add_space(10.0);
+
+                        if decrypt_btn.clicked() {
+                            let file_path = self.file_path.clone();
+                            let output_folder = self.output_folder.clone();
+                            let key = self.key.clone();
+                            let (tx, rx) = mpsc::channel();
+                            self.progress_rx = rx;
+                            self.progress = 0.0;
+                            self.bytes_processed = 0;
+                            self.anim_state = AnimState::Processing;
+
+                            thread::spawn(move || {
+                                tx.send(Progress::Log("Starting decryption...".to_string())).ok();
+                                tx.send(Progress::Percent(0.1)).ok();
+
+                                let data = match std::fs::read(&file_path) {
+                                    Ok(d) => { tx.send(Progress::Bytes(d.len())).ok(); d }
+                                    Err(e) => {
+                                        tx.send(Progress::Error(e.to_string())).ok();
+                                        return;
+                                    }
+                                };
+
+                                tx.send(Progress::Log(format!("Read {} bytes", data.len()))).ok();
+                                tx.send(Progress::Percent(0.3)).ok();
+
+                                match haruhi::decrypt_data(&key, &data) {
+                                    Ok((decrypted, ext)) => {
+                                        tx.send(Progress::Log("Data decrypted".to_string())).ok();
+                                        tx.send(Progress::Percent(0.8)).ok();
+                                        let base_name = if file_path.ends_with(".haruhi") {
+                                            std::path::Path::new(&file_path)
+                                                .file_stem()
+                                                .and_then(|s| s.to_str())
+                                                .unwrap_or("output")
+                                                .to_string()
+                                        } else {
+                                            "output".to_string()
+                                        };
+                                        let file_name = format!("{}.{}", base_name, ext);
+                                        let output_path = std::path::Path::new(&output_folder).join(file_name).to_string_lossy().to_string();
+
+                                        if let Err(e) = std::fs::write(&output_path, &decrypted) {
+                                            tx.send(Progress::Error(e.to_string())).ok();
+                                            return;
+                                        }
+                                        tx.send(Progress::Done(output_path)).ok();
+                                    },
+                                    Err(e) => {
+                                        tx.send(Progress::Error(e)).ok();
+                                    }
+                                }
+                            });
                         }
                     });
-                }
-            });
 
-            ui.add_space(10.0);
+                    ui.add_space(20.0);
 
-            ui.horizontal(|ui| {
-                ui.group(|ui| {
-                    ui.strong("💾 Bytes");
-                    ui.add_space(5.0);
-                    ui.label(egui::RichText::new(format!("{}", Self::format_number(self.bytes_processed))).size(16.0));
+                    ui.horizontal(|ui| {
+                        ui.add_space((ui.available_width() - 280.0) / 2.0);
+                        ui.group(|ui| {
+                            ui.set_min_width(120.0);
+                            ui.strong("💾 Bytes");
+                            ui.add_space(5.0);
+                            ui.label(egui::RichText::new(format!("{}", Self::format_number(self.bytes_processed))).size(16.0));
+                        });
+
+                        ui.add_space(20.0);
+
+                        ui.group(|ui| {
+                            ui.set_min_width(120.0);
+                            ui.strong("🔔 Status");
+                            ui.add_space(5.0);
+                            let status_text = match self.anim_state {
+                                AnimState::Idle => "Ready",
+                                AnimState::Processing => "Working...",
+                                AnimState::Done => "Complete!",
+                            };
+                            ui.label(egui::RichText::new(status_text).size(16.0));
+                        });
+                    });
                 });
-
-                ui.add_space(20.0);
-
-                ui.group(|ui| {
-                    ui.strong("🔔 Status");
-                    ui.add_space(5.0);
-                    let status_text = match self.anim_state {
-                        AnimState::Idle => "Ready",
-                        AnimState::Processing => "Working...",
-                        AnimState::Done => "Complete!",
-                    };
-                    ui.label(egui::RichText::new(status_text).size(16.0));
-                });
             });
-
-            }); // close vertical_centered
 
             ui.add_space(10.0);
 
