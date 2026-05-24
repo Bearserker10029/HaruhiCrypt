@@ -54,7 +54,7 @@ impl HaruhiCryptApp {
             haruhi_working_texture: None,
             anim_state: AnimState::Idle,
             bytes_processed: 0,
-            music_volume: 0.5,
+            music_volume: 1.0,
             music_playing: Arc::new(AtomicBool::new(true)),
             music_started: false,
             music_sink: None,
