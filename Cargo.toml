@@ -17,7 +17,7 @@ rfd = "0.14"
 chrono = "0.4"
 image = { version = "0.24", default-features = false, features = ["jpeg"] }
 winapi = { version = "0.3", features = ["winuser", "windef", "wingdi", "combaseapi", "objbase", "shobjidl", "uxtheme", "minwindef"] }
-rodio = "0.19"
+rodio = { version = "0.19", default-features = false, features = ["minimp3"] }
 
 [dependencies.egui]
 version = "0.25"
