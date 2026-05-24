@@ -1,6 +1,9 @@
 use eframe::egui;
 use std::sync::mpsc;
 use std::thread;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use rodio::Source;
 
 use crate::haruhi;
 
@@ -31,6 +34,8 @@ pub struct HaruhiCryptApp {
     haruhi_working_texture: Option<egui::TextureHandle>,
     anim_state: AnimState,
     bytes_processed: usize,
+    music_volume: f32,
+    music_playing: Arc<AtomicBool>,
 }
 
 impl HaruhiCryptApp {
@@ -47,6 +52,8 @@ impl HaruhiCryptApp {
             haruhi_working_texture: None,
             anim_state: AnimState::Idle,
             bytes_processed: 0,
+            music_volume: 0.5,
+            music_playing: Arc::new(AtomicBool::new(true)),
         }
     }
 
@@ -104,6 +111,48 @@ impl HaruhiCryptApp {
                 self.haruhi_working_texture = Some(texture);
             }
         }
+        self.start_music();
+    }
+
+    fn start_music(&self) {
+        if !self.music_playing.load(Ordering::SeqCst) {
+            return;
+        }
+        let music_data_1 = include_bytes!("../../resources/限界突破のメロディ+(Melody+of+Breaking+Limits).mp3");
+        let music_data_2 = include_bytes!("../../resources/限界突破のメロディ+(Melody+of+Breaking+Limits)-1.mp3");
+        let volume = self.music_volume;
+        let playing = self.music_playing.clone();
+
+        thread::spawn(move || {
+            let (_stream, stream_handle) = match rodio::OutputStream::try_default() {
+                Ok(s) => s,
+                Err(_) => return,
+            };
+            let sink1 = match rodio::Sink::try_new(&stream_handle) {
+                Ok(s) => s,
+                Err(_) => return,
+            };
+            let sink2 = match rodio::Sink::try_new(&stream_handle) {
+                Ok(s) => s,
+                Err(_) => return,
+            };
+
+            let cursor1 = std::io::Cursor::new(music_data_1.as_slice());
+            if let Ok(source) = rodio::Decoder::new(cursor1) {
+                sink1.append(source.repeat_infinite());
+                sink1.set_volume(volume);
+            }
+
+            let cursor2 = std::io::Cursor::new(music_data_2.as_slice());
+            if let Ok(source) = rodio::Decoder::new(cursor2) {
+                sink2.append(source.repeat_infinite());
+                sink2.set_volume(volume);
+            }
+
+            while playing.load(Ordering::SeqCst) {
+                thread::sleep(std::time::Duration::from_millis(100));
+            }
+        });
     }
 
     fn process_progress(&mut self) {
@@ -242,9 +291,9 @@ impl eframe::App for HaruhiCryptApp {
                             }
                         });
                         if !output_folder_valid && !self.output_folder.is_empty() {
-                            ui.label(egui::RichText::new("⚠️ Invalid folder").color(egui::Color32::RED).small());
+                            ui.label(egui::RichText::new("⚠ Invalid folder").color(egui::Color32::RED).small());
                         } else if self.output_folder.is_empty() {
-                            ui.label(egui::RichText::new("⚠️ Output folder is required").color(egui::Color32::RED).small());
+                            ui.label(egui::RichText::new("⚠ Output folder is required").color(egui::Color32::RED).small());
                         }
                     });
                 });
@@ -390,6 +439,16 @@ impl eframe::App for HaruhiCryptApp {
                             };
                             ui.label(egui::RichText::new(status_text).size(16.0));
                         });
+                    });
+
+                    ui.add_space(15.0);
+
+                    ui.horizontal(|ui| {
+                        ui.add_space((ui.available_width() - 250.0) / 2.0);
+                        ui.label("🔊");
+                        ui.add(egui::Slider::new(&mut self.music_volume, 0.0..=1.0)
+                            .text("Volume")
+                            .clamp_to_range(true));
                     });
                 });
             });
