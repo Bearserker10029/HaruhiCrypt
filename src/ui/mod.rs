@@ -85,7 +85,7 @@ impl HaruhiCryptApp {
 
     fn load_haruhi_image(&mut self, ctx: &egui::Context) {
         if self.haruhi_texture.is_none() {
-            let img_data = include_bytes!("../../haruhi.jpg");
+            let img_data = include_bytes!("../../resources/haruhi.jpg");
             if let Ok(img) = image::load_from_memory(img_data) {
                 let rgba = img.to_rgba8();
                 let size = [rgba.width() as usize, rgba.height() as usize];
@@ -95,7 +95,7 @@ impl HaruhiCryptApp {
             }
         }
         if self.haruhi_working_texture.is_none() {
-            let img_data = include_bytes!("../../haruhi-1.jpg");
+            let img_data = include_bytes!("../../resources/haruhi-1.jpg");
             if let Ok(img) = image::load_from_memory(img_data) {
                 let rgba = img.to_rgba8();
                 let size = [rgba.width() as usize, rgba.height() as usize];
@@ -174,93 +174,84 @@ impl eframe::App for HaruhiCryptApp {
                 }
 
                 ui.add_space(5.0);
-                ui.label(egui::RichText::new("Encryption based on the Haruhi Problem").small().weak());
+                ui.label(egui::RichText::new("Encryption based on the Haruhi Problem").weak());
                 ui.add_space(10.0);
 
-                let image_size = if is_dark { 160.0 } else { 260.0 };
-
                 if let (Some(base_texture), Some(working_texture)) = (&self.haruhi_texture, &self.haruhi_working_texture) {
-                    let base_sized = egui::load::SizedTexture::from_handle(base_texture);
-                    let working_sized = egui::load::SizedTexture::from_handle(working_texture);
-
-                    let base_image = egui::Image::from_texture(base_sized).fit_to_exact_size([image_size, image_size].into());
-                    let working_image = egui::Image::from_texture(working_sized).fit_to_exact_size([image_size, image_size].into());
-
-                    ui.add(base_image);
+                    let image_size = if is_dark { 200.0 } else { 300.0 };
+                    let sized = egui::load::SizedTexture::from_handle(if is_dark { working_texture } else { base_texture });
+                    let image = egui::Image::from_texture(sized).fit_to_exact_size([image_size, image_size].into());
+                    ui.add(image);
 
                     if self.anim_state == AnimState::Processing {
-                        ui.add(working_image);
+                        let time = ctx.input(|i| i.time);
+                        let pulse = (time as f32 * 2.0).sin().abs() * 0.15 + 0.05;
+                        let rect = ui.available_rect_before_wrap();
+                        ui.painter().rect_filled(rect, 0.0, egui::Color32::from_rgba_unmultiplied(155, 89, 182, (pulse * 255.0) as u8));
                     }
-                }
-
-                if self.anim_state == AnimState::Processing {
-                    let time = ctx.input(|i| i.time);
-                    let pulse = (time as f32 * 2.0).sin().abs() * 0.15 + 0.05;
-                    let pulse_rect = ui.available_rect_before_wrap();
-                    ui.painter().rect_filled(pulse_rect, 0.0, egui::Color32::from_rgba_unmultiplied(155, 89, 182, (pulse * 255.0) as u8));
                 }
             });
 
             ui.add_space(15.0);
 
-            ui.horizontal_centered(|ui| {
-                ui.group(|ui| {
-                    ui.strong("🔑 Key");
-                    ui.add_space(5.0);
-                    ui.horizontal(|ui| {
-                        ui.text_edit_singleline(&mut self.key);
-                        if ui.button("🎲 Generate").clicked() {
-                            self.generate_random_key();
-                        }
-                    });
-                    ui.add_space(3.0);
-                    ui.label(egui::RichText::new("16 bytes hex key (e.g., 0123-4567-89ab-cdef)").small().weak());
-                });
-            });
-
-            ui.add_space(10.0);
-
-            ui.horizontal_centered(|ui| {
-                ui.group(|ui| {
-                    ui.strong("📁 Files");
-                    ui.add_space(5.0);
-
-                    ui.label("Input File:");
-                    ui.horizontal(|ui| {
-                        ui.text_edit_singleline(&mut self.file_path);
-                        if ui.button("📂 Browse").clicked() {
-                            if let Some(path) = rfd::FileDialog::new().pick_file() {
-                                self.file_path = path.to_string_lossy().to_string();
-                                self.log(&format!("File selected: {}", self.file_path));
-                            }
-                        }
-                    });
-
-                    ui.add_space(8.0);
-
-                    ui.label("Output Folder:");
-                    ui.horizontal(|ui| {
-                        ui.text_edit_singleline(&mut self.output_folder);
-                        if ui.button("📂 Browse").clicked() {
-                            if let Some(path) = rfd::FileDialog::new().pick_folder() {
-                                self.output_folder = path.to_string_lossy().to_string();
-                                self.log(&format!("Output folder: {}", self.output_folder));
-                            }
-                        }
-                    });
-                    if !output_folder_valid && !self.output_folder.is_empty() {
-                        ui.label(egui::RichText::new("⚠️ Invalid folder").color(egui::Color32::RED).small());
-                    } else if self.output_folder.is_empty() {
-                        ui.label(egui::RichText::new("⚠️ Output folder is required").color(egui::Color32::RED).small());
+            ui.vertical_centered(|ui| {
+            ui.group(|ui| {
+                ui.strong("🔑 Key");
+                ui.add_space(5.0);
+                ui.horizontal(|ui| {
+                    ui.text_edit_singleline(&mut self.key);
+                    if ui.button("🎲 Generate").clicked() {
+                        self.generate_random_key();
                     }
                 });
+                ui.add_space(3.0);
+                ui.label(egui::RichText::new("16 bytes hex key (e.g., 0123-4567-89ab-cdef)").weak());
             });
 
             ui.add_space(10.0);
 
-            ui.horizontal_centered(|ui| {
-                let encrypt_btn = ui.add_enabled(can_encrypt, egui::Button::new(egui::RichText::new("🔒 ENCRYPT").color(egui::Color32::from_rgb(255, 255, 255))).fill(egui::Color32::from_rgb(155, 89, 182)));
-                let decrypt_btn = ui.add_enabled(can_decrypt, egui::Button::new(egui::RichText::new("🔓 DECRYPT").color(egui::Color32::from_rgb(255, 255, 255))).fill(egui::Color32::from_rgb(26, 188, 156)));
+            ui.group(|ui| {
+                ui.strong("📁 Files");
+                ui.add_space(5.0);
+
+                ui.label("Input File:");
+                ui.horizontal(|ui| {
+                    ui.text_edit_singleline(&mut self.file_path);
+                    if ui.button("📂 Browse").clicked() {
+                        if let Some(path) = rfd::FileDialog::new().pick_file() {
+                            self.file_path = path.to_string_lossy().to_string();
+                            self.log(&format!("File selected: {}", self.file_path));
+                        }
+                    }
+                });
+
+                ui.add_space(8.0);
+
+                ui.label("Output Folder:");
+                ui.horizontal(|ui| {
+                    ui.text_edit_singleline(&mut self.output_folder);
+                    if ui.button("📂 Browse").clicked() {
+                        if let Some(path) = rfd::FileDialog::new().pick_folder() {
+                            self.output_folder = path.to_string_lossy().to_string();
+                            self.log(&format!("Output folder: {}", self.output_folder));
+                        }
+                    }
+                });
+                if !output_folder_valid && !self.output_folder.is_empty() {
+                    ui.label(egui::RichText::new("⚠️ Invalid folder").color(egui::Color32::RED).small());
+                } else if self.output_folder.is_empty() {
+                    ui.label(egui::RichText::new("⚠️ Output folder is required").color(egui::Color32::RED).small());
+                }
+            });
+
+            ui.add_space(10.0);
+
+            ui.horizontal(|ui| {
+                let encrypt_btn = egui::Button::new(egui::RichText::new("🔒 ENCRYPT").color(egui::Color32::WHITE)).fill(egui::Color32::from_rgb(155, 89, 182));
+                let decrypt_btn = egui::Button::new(egui::RichText::new("🔓 DECRYPT").color(egui::Color32::WHITE)).fill(egui::Color32::from_rgb(26, 188, 156));
+
+                let encrypt_btn = ui.add_enabled(can_encrypt, encrypt_btn);
+                let decrypt_btn = ui.add_enabled(can_decrypt, decrypt_btn);
 
                 if encrypt_btn.clicked() {
                     let file_path = self.file_path.clone();
@@ -365,31 +356,17 @@ impl eframe::App for HaruhiCryptApp {
                 }
             });
 
-            ui.add_space(15.0);
+            ui.add_space(10.0);
 
-            let available = ui.available_width();
-            let card_w = (available - 40.0) / 3.0;
-
-            ui.horizontal_centered(|ui| {
-                ui.set_width(card_w);
-                ui.group(|ui| {
-                    ui.strong("📊 Progress");
-                    ui.add_space(5.0);
-                    ui.label(egui::RichText::new(format!("{:.0}%", self.progress * 100.0)).size(18.0));
-                });
-
-                ui.add_space(15.0);
-
-                ui.set_width(card_w);
+            ui.horizontal(|ui| {
                 ui.group(|ui| {
                     ui.strong("💾 Bytes");
                     ui.add_space(5.0);
                     ui.label(egui::RichText::new(format!("{}", Self::format_number(self.bytes_processed))).size(16.0));
                 });
 
-                ui.add_space(15.0);
+                ui.add_space(20.0);
 
-                ui.set_width(card_w);
                 ui.group(|ui| {
                     ui.strong("🔔 Status");
                     ui.add_space(5.0);
@@ -402,39 +379,37 @@ impl eframe::App for HaruhiCryptApp {
                 });
             });
 
-            ui.add_space(20.0);
+            }); // close vertical_centered
 
-            ui.vertical_centered(|ui| {
-                let progress_bar = egui::ProgressBar::new(self.progress)
-                    .show_percentage()
-                    .animate(true)
-                    .fill(egui::Color32::from_rgb(155, 89, 182));
-                ui.add(progress_bar);
-            });
+            ui.add_space(10.0);
+
+            let progress_bar = egui::ProgressBar::new(self.progress)
+                .show_percentage()
+                .animate(true)
+                .fill(egui::Color32::from_rgb(155, 89, 182));
+            ui.add(progress_bar);
 
             ui.add_space(10.0);
 
             let available_height = ui.available_height();
             let terminal_height = (available_height * 0.2).clamp(80.0, 200.0);
 
-            ui.horizontal_centered(|ui| {
-                ui.group(|ui| {
-                    ui.set_width(ui.available_width());
-                    ui.strong("📋 Terminal");
-                    ui.add_space(5.0);
-                    egui::ScrollArea::vertical()
-                        .max_height(terminal_height)
-                        .show(ui, |ui| {
-                            let log_text = self.log_messages.join("\n");
-                            ui.label(egui::RichText::new(log_text).monospace().small());
-                        });
-                });
+            ui.group(|ui| {
+                ui.set_width(ui.available_width());
+                ui.strong("📋 Terminal");
+                ui.add_space(5.0);
+                egui::ScrollArea::vertical()
+                    .max_height(terminal_height)
+                    .show(ui, |ui| {
+                        let log_text = self.log_messages.join("\n");
+                        ui.label(egui::RichText::new(log_text).monospace().small());
+                    });
             });
 
             ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
                 ui.add_space(5.0);
                 ui.separator();
-                ui.label(egui::RichText::new("HaruhiCrypt v0.1.0").weak().small());
+                ui.label(egui::RichText::new("HaruhiCrypt v0.1.0").weak());
             });
         });
     }

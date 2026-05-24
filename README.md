@@ -90,11 +90,22 @@ Security is based on two computationally hard problems:
 
 ### GUI Interface
 
+The UI is inspired by MikuMikuBeam's design with a purple/teal theme and animated elements.
+
 1. Run `haruhi-crypt.exe`
 2. Enter a key or generate a random one (🎲 Generate)
-3. Select an input file
+3. Select an input file (📂 Browse)
 4. Select an output folder (required)
-5. Press **ENCRYPT** or **DECRYPT**
+5. Press **🔒 ENCRYPT** or **🔓 DECRYPT**
+6. Monitor progress via the stats cards and terminal
+
+### UI Features
+
+- **Dual Image System**: Haruhi image changes during encryption (haruhi.jpg → haruhi-1.jpg)
+- **Pulse Effect**: Purple pulse overlay during active processing
+- **Stats Cards**: Real-time Bytes and Status display
+- **Adaptive Terminal**: Auto-adjusting log display
+- **Centered Layout**: Key, Files, and Buttons sections centered for aesthetics
 
 ### Key Example
 
@@ -138,6 +149,15 @@ The standalone executable will be at `target/release/haruhi-crypt.exe`.
 │  └─────────────────────────────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────────┘
 ```
+
+### UI Design
+
+Inspired by **MikuMikuBeam**, HaruhiCrypt features a cute and functional interface:
+
+- **Color Scheme**: Purple (#9b59b2) for ENCRYPT, Teal (#1abc9c) for DECRYPT
+- **Animation States**: Image transitions and pulse effects during processing
+- **Layout**: Centered sections (Key, Files, Buttons) for visual appeal
+- **Feedback**: Real-time progress bar, stats cards, and terminal logging
 
 ---
 
