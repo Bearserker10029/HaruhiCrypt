@@ -431,7 +431,7 @@ impl eframe::App for HaruhiCryptApp {
 pub fn run() {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([600.0, 750.0])
+            .with_inner_size([850.0, 750.0])
             .with_min_inner_size([550.0, 650.0])
             .with_title("HaruhiCrypt"),
         ..Default::default()
