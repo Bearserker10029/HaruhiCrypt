@@ -3,7 +3,6 @@ use std::sync::mpsc;
 use std::thread;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use rodio::Source;
 
 use crate::haruhi;
 
@@ -36,6 +35,9 @@ pub struct HaruhiCryptApp {
     bytes_processed: usize,
     music_volume: f32,
     music_playing: Arc<AtomicBool>,
+    music_started: bool,
+    music_sink: Option<Arc<rodio::Sink>>,
+    _audio_stream: Option<rodio::OutputStream>, // Keep stream alive
 }
 
 impl HaruhiCryptApp {
@@ -54,6 +56,9 @@ impl HaruhiCryptApp {
             bytes_processed: 0,
             music_volume: 0.5,
             music_playing: Arc::new(AtomicBool::new(true)),
+            music_started: false,
+            music_sink: None,
+            _audio_stream: None,
         }
     }
 
@@ -114,45 +119,49 @@ impl HaruhiCryptApp {
         self.start_music();
     }
 
-    fn start_music(&self) {
-        if !self.music_playing.load(Ordering::SeqCst) {
+    fn start_music(&mut self) {
+        if self.music_started || !self.music_playing.load(Ordering::SeqCst) {
             return;
         }
-        let music_data_1 = include_bytes!("../../resources/限界突破のメロディ+(Melody+of+Breaking+Limits).mp3");
-        let music_data_2 = include_bytes!("../../resources/限界突破のメロディ+(Melody+of+Breaking+Limits)-1.mp3");
-        let volume = self.music_volume;
-        let playing = self.music_playing.clone();
-
-        thread::spawn(move || {
-            let (_stream, stream_handle) = match rodio::OutputStream::try_default() {
-                Ok(s) => s,
-                Err(_) => return,
-            };
-            let sink1 = match rodio::Sink::try_new(&stream_handle) {
-                Ok(s) => s,
-                Err(_) => return,
-            };
-            let sink2 = match rodio::Sink::try_new(&stream_handle) {
-                Ok(s) => s,
-                Err(_) => return,
-            };
-
-            let cursor1 = std::io::Cursor::new(music_data_1.as_slice());
-            if let Ok(source) = rodio::Decoder::new(cursor1) {
-                sink1.append(source.repeat_infinite());
-                sink1.set_volume(volume);
+        self.music_started = true;
+        
+        let music_data_1 = include_bytes!("../../resources/限界突破のメロディ+(Melody+of+Breaking+Limits).mp3").to_vec();
+        let music_data_2 = include_bytes!("../../resources/限界突破のメロディ+(Melody+of+Breaking+Limits)-1.mp3").to_vec();
+        
+        if let Ok((stream, stream_handle)) = rodio::OutputStream::try_default() {
+            if let Ok(sink) = rodio::Sink::try_new(&stream_handle) {
+                let arc_sink = Arc::new(sink);
+                self.music_sink = Some(arc_sink.clone());
+                self._audio_stream = Some(stream); // Keep stream alive in the struct
+                
+                let playing = self.music_playing.clone();
+                let sink_clone = arc_sink.clone();
+                
+                thread::spawn(move || {
+                    loop {
+                        if !playing.load(Ordering::SeqCst) {
+                            break;
+                        }
+                        
+                        // Refill the queue if it's getting empty (we want continuous playback)
+                        // If length is 0, play both songs in sequence
+                        if sink_clone.len() == 0 {
+                            let cursor1 = std::io::Cursor::new(music_data_1.clone());
+                            if let Ok(source) = rodio::Decoder::new(cursor1) {
+                                sink_clone.append(source);
+                            }
+                            
+                            let cursor2 = std::io::Cursor::new(music_data_2.clone());
+                            if let Ok(source) = rodio::Decoder::new(cursor2) {
+                                sink_clone.append(source);
+                            }
+                        }
+                        
+                        thread::sleep(std::time::Duration::from_millis(1000));
+                    }
+                });
             }
-
-            let cursor2 = std::io::Cursor::new(music_data_2.as_slice());
-            if let Ok(source) = rodio::Decoder::new(cursor2) {
-                sink2.append(source.repeat_infinite());
-                sink2.set_volume(volume);
-            }
-
-            while playing.load(Ordering::SeqCst) {
-                thread::sleep(std::time::Duration::from_millis(100));
-            }
-        });
+        }
     }
 
     fn process_progress(&mut self) {
@@ -446,9 +455,13 @@ impl eframe::App for HaruhiCryptApp {
                     ui.horizontal(|ui| {
                         ui.add_space((ui.available_width() - 250.0) / 2.0);
                         ui.label("🔊");
-                        ui.add(egui::Slider::new(&mut self.music_volume, 0.0..=1.0)
+                        if ui.add(egui::Slider::new(&mut self.music_volume, 0.0..=1.0)
                             .text("Volume")
-                            .clamp_to_range(true));
+                            .clamp_to_range(true)).changed() {
+                            if let Some(sink) = &self.music_sink {
+                                sink.set_volume(self.music_volume);
+                            }
+                        }
                     });
                 });
             });
