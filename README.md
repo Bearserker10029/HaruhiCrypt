@@ -2,7 +2,7 @@
 
 **Encryption based on the Haruhi Problem (Superpermutations)**
 
-![Haruhi Suzumiya](./haruhi.jpg)
+![Haruhi Suzumiya](./resources/haruhi.jpg)
 
 *Because permutations are also cute, and even more so when Haruhi arranges them.*
 
