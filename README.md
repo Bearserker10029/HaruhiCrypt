@@ -105,7 +105,9 @@ The UI is inspired by MikuMikuBeam's design with a purple/teal theme and animate
 - **Pulse Effect**: Purple pulse overlay during active processing
 - **Stats Cards**: Real-time Bytes and Status display
 - **Adaptive Terminal**: Auto-adjusting log display
-- **Centered Layout**: Key, Files, and Buttons sections centered for aesthetics
+- **Two-Column Layout**: Key/Files section (left), Buttons/Stats section (right)
+- **Background Music**: Dual-track loop with real-time volume control
+- **Status Icons**: ⚡ Ready, ⚙️ Processing..., ✅ Done!
 
 ### Key Example
 
@@ -156,8 +158,33 @@ Inspired by **MikuMikuBeam**, HaruhiCrypt features a cute and functional interfa
 
 - **Color Scheme**: Purple (#9b59b2) for ENCRYPT, Teal (#1abc9c) for DECRYPT
 - **Animation States**: Image transitions and pulse effects during processing
-- **Layout**: Centered sections (Key, Files, Buttons) for visual appeal
+- **Two-Column Layout**: Key/Files on left, Buttons/Stats on right
 - **Feedback**: Real-time progress bar, stats cards, and terminal logging
+- **Background Music**: Auto-plays on startup with volume slider control
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    🔐 HaruhiCrypt                           │
+│               ⚡ Ready / ⚙️ Processing...                   │
+│                                                             │
+│              [Haruhi Image - Adaptive Size]                │
+├─────────────────────────────────┬───────────────────────────┤
+│  🔑 Key                         │   🔒 ENCRYPT              │
+│  [________________] 🎲 Generate │   🔓 DECRYPT              │
+│                                 │                           │
+│  📁 Files                       ├───────────────────────────┤
+│  Input File: [____________] 📂  │   💾 Bytes  │  🔔 Status  │
+│  Output:      [____________] 📂  │   1,234     │  Ready      │
+│                                 │                           │
+│                                 │   🔊 [ Volume Slider ]     │
+├─────────────────────────────────┴───────────────────────────┤
+│  ████████████░░░░░░░░░░░░░░░░░░░░░░  50%                    │
+├─────────────────────────────────────────────────────────────┤
+│  📋 Terminal                                               │
+│  [09:15:23] File selected: document.pdf                    │
+│  [09:15:24] Starting encryption...                         │
+└─────────────────────────────────────────────────────────────┘
+```
 
 ---
 
@@ -170,6 +197,7 @@ Inspired by **MikuMikuBeam**, HaruhiCrypt features a cute and functional interfa
 - **rfd**: File selection dialog
 - **image**: Image loading for UI
 - **chrono**: Timestamps for logging
+- **rodio**: Background music playback (minimp3 decoder)
 
 ---
 
