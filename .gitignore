@@ -1,7 +1,4 @@
 target/
-*.jpg
-*.png
-*.gif
 .DS_Store
 .idea
 .vscode

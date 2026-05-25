@@ -51,30 +51,22 @@ In October 2018, Robin Houston, Jay Pantone, and Vince Vatter refined the proof,
 
 1. **Key Derivation**: The key is processed through Argon2id to produce a 256-bit seed.
 
-2. **Superpermutation Generation**: For n=8, we generate a superpermutation containing all 40,320 permutations as substrings. The superpermutation for n=8 has 317,521 bytes.
+2. **Superpermutation**: A superpermutation containing all 40,320 permutations (n=8, 317,521 bytes) is generated once and cached in memory using `OnceLock`.
 
-3. **Permutation Extraction**: All unique 8-element permutations are extracted from sliding windows of the superpermutation. These form our permutation table (cached with OnceLock).
-
-4. **CTR Mode Encryption**: Each 8-byte block is encrypted using:
+3. **CTR Mode Encryption**: Each 8-byte block is encrypted using:
    ```
    keystream_block = SHA256(seed || nonce || block_index)
-   result = block XOR keystream_block
+   result = plaintext XOR keystream_block
    ```
-   This replaces the previous ECB-style permutation cipher.
-   key → SHA-256 → seed
-   offset = hash(seed || block_index) mod 40320
-   permutation = permutation_table[offset]
-   result[permutation[i]] = block[i]  (for encryption)
-   result[i] = block[permutation[i]]  (for decryption)
-   ```
+   The keystream is derived from the seed and nonce, ensuring unique encryption per file.
 
 ### Why This Is Unique
 
-Unlike traditional ciphers that use predetermined S-boxes or fixed permutations, HaruhiCrypt derives permutations from a **superpermutation** - a mathematical object specifically tied to the Haruhi Problem. The superpermutation acts as a "permutation reservoir" where:
+HaruhiCrypt is the only cipher that bases its security on the **Haruhi Problem** - a mathematical open problem. Unlike traditional ciphers:
 
-- Each permutation appears exactly once as an 8-character window
-- Adjacent windows share 7 characters (overlapping property)
-- The relationship between superpermutation structure and key-derived offsets creates a complex mapping
+- **Unique Foundation**: Based on superpermutations (np-hard problem for n > 5)
+- **No Fixed Structures**: Unlike AES or DES, no predetermined S-boxes or tables
+- **Visual Metaphor**: The cipher literally "arranges episodes" of data in every possible order
 
 ### Security
 
@@ -150,19 +142,24 @@ The standalone executable will be at `target/release/haruhi-crypt.exe`.
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                      HaruhiCrypt                             │
-├─────────────────────────────────────────────────────────────┤
-│  ┌─────────────┐    ┌──────────────┐    ┌────────────────┐  │
-│  │ Superperm   │ -> │ Permutation  │ -> │ Block Cipher   │  │
-│  │ Generator   │    │ Extractor    │    │ (enc/dec)      │  │
-│  └─────────────┘    └──────────────┘    └────────────────┘  │
-│         │                   │                     │            │
-│         v                   v                     v            │
-│  ┌─────────────────────────────────────────────────────────┐ │
-│  │              40,320 permutations (n=8)                    │ │
-│  └─────────────────────────────────────────────────────────┘ │
-└─────────────────────────────────────────────────────────────┘
+┌──────────────────────────── HaruhiCrypt v0.2.0 ─────────────────────────────┐
+│                                                                             │
+│   Key    ──► Argon2id ──► 256-bit seed                                      │
+│                                   │                                         │
+│   Nonce ──────────────────────────┘                                         │
+│                                   │                                         │
+│                                   ▼                                         │
+│   ┌──────────────────────── CTR Mode Encryption ─────────────────────────┐  │
+│   │ keystream = SHA256(seed || nonce || block_index)                     │  │
+│   │ ciphertext = plaintext XOR keystream                                 │  │
+│   └──────────────────────────────────────────────────────────────────────┘  │
+│                                   │                                         │
+│                                   ▼                                         │
+│   ┌─────────────────────── HMAC Authentication ──────────────────────────┐  │
+│   │ HMAC-SHA256(seed || nonce || ciphertext)                             │  │
+│   └──────────────────────────────────────────────────────────────────────┘  │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ### UI Design
@@ -175,29 +172,7 @@ Inspired by **MikuMikuBeam**, HaruhiCrypt features a cute and functional interfa
 - **Feedback**: Real-time progress bar, stats cards, and terminal logging
 - **Background Music**: Auto-plays on startup with volume slider control
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    🔐 HaruhiCrypt                           │
-│               ⚡ Ready / ⚙️ Processing...                   │
-│                                                             │
-│              [Haruhi Image - Adaptive Size]                │
-├─────────────────────────────────┬───────────────────────────┤
-│  🔑 Key                         │   🔒 ENCRYPT              │
-│  [________________] 🎲 Generate │   🔓 DECRYPT              │
-│                                 │                           │
-│  📁 Files                       ├───────────────────────────┤
-│  Input File: [____________] 📂  │   💾 Bytes  │  🔔 Status  │
-│  Output:      [____________] 📂  │   1,234     │  Ready      │
-│                                 │                           │
-│                                 │   🔊 [ Volume Slider ]     │
-├─────────────────────────────────┴───────────────────────────┤
-│  ████████████░░░░░░░░░░░░░░░░░░░░░░  50%                    │
-├─────────────────────────────────────────────────────────────┤
-│  📋 Terminal                                               │
-│  [09:15:23] File selected: document.pdf                    │
-│  [09:15:24] Starting encryption...                         │
-└─────────────────────────────────────────────────────────────┘
-```
+![HaruhiCrypt UI](./resources/UI.png)
 
 ---
 
@@ -212,7 +187,6 @@ Inspired by **MikuMikuBeam**, HaruhiCrypt features a cute and functional interfa
 - **chrono**: Timestamps for logging
 - **rodio**: Background music playback (minimp3 decoder)
 - **argon2**: Password hashing (Argon2id key derivation)
-- **chacha20**: Cipher crate (reserved for future enhancements)
 
 ---
 
@@ -245,7 +219,7 @@ Inspired by **MikuMikuBeam**, HaruhiCrypt features a cute and functional interfa
 
 - **8-byte blocks**: Encryption works with 8-byte blocks
 - **Not verified cryptography**: This is an educational/experimental project. For real use, use AES-GCM or similar.
-- **Superpermutation generation**: First-time initialization generates the n=8 superpermutation (~317KB)
+- **Superpermutation**: Cached in memory after first generation (OnceLock) - not regenerated on each use
 
 ---
 
