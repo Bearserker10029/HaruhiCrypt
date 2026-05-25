@@ -1,8 +1,8 @@
 [package]
 name = "haruhi-crypt"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
-description = "HaruhiCrypt - Encryption using the Haruhi Problem (Superpermutations)"
+description = "HaruhiCrypt v2 - Encryption using the Haruhi Problem (Superpermutations)"
 license = "MIT"
 repository = ""
 keywords = ["cryptography", "encryption", "permutation", "haruhi"]
@@ -18,6 +18,8 @@ chrono = "0.4"
 image = { version = "0.24", default-features = false, features = ["jpeg"] }
 winapi = { version = "0.3", features = ["winuser", "windef", "wingdi", "combaseapi", "objbase", "shobjidl", "uxtheme", "minwindef"] }
 rodio = { version = "0.19", default-features = false, features = ["minimp3"] }
+argon2 = "0.5"
+chacha20 = "0.9"
 
 [dependencies.egui]
 version = "0.25"

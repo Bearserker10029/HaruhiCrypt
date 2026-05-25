@@ -49,12 +49,18 @@ In October 2018, Robin Houston, Jay Pantone, and Vince Vatter refined the proof,
 
 ### Algorithm
 
-1. **Superpermutation Generation**: For n=8, we generate a superpermutation containing all 40,320 permutations as substrings. The superpermutation for n=8 has 317,521 bytes.
+1. **Key Derivation**: The key is processed through Argon2id to produce a 256-bit seed.
 
-2. **Permutation Extraction**: All unique 8-element permutations are extracted from sliding windows of the superpermutation. These form our permutation table.
+2. **Superpermutation Generation**: For n=8, we generate a superpermutation containing all 40,320 permutations as substrings. The superpermutation for n=8 has 317,521 bytes.
 
-3. **Block Encryption**: Each 8-byte block is reordered according to a permutation selected by:
+3. **Permutation Extraction**: All unique 8-element permutations are extracted from sliding windows of the superpermutation. These form our permutation table (cached with OnceLock).
+
+4. **CTR Mode Encryption**: Each 8-byte block is encrypted using:
    ```
+   keystream_block = SHA256(seed || nonce || block_index)
+   result = block XOR keystream_block
+   ```
+   This replaces the previous ECB-style permutation cipher.
    key → SHA-256 → seed
    offset = hash(seed || block_index) mod 40320
    permutation = permutation_table[offset]
@@ -81,8 +87,15 @@ Security is based on two computationally hard problems:
 ### File Format
 
 ```
-[1 byte: extension length][N bytes: extension][16 bytes: Random IV][encrypted data][32 bytes: HMAC-SHA256]
+[16 bytes: nonce][1 byte: ext_len][N bytes: extension][16 bytes: IV][encrypted data][32 bytes: HMAC-SHA256]
 ```
+
+- **nonce**: Unique 16-byte value per file (anti-replay)
+- **ext_len**: Length of original file extension
+- **extension**: Original file extension
+- **IV**: Initialization vector (authenticated in HMAC)
+- **encrypted data**: Ciphertext in CTR mode
+- **HMAC**: Authenticates nonce + ext_len + extension + IV + ciphertext
 
 ---
 
@@ -191,13 +204,40 @@ Inspired by **MikuMikuBeam**, HaruhiCrypt features a cute and functional interfa
 ## Dependencies
 
 - **egui/eframe**: Portable GUI (OpenGL)
-- **sha2**: Hash for key derivation
+- **sha2**: SHA-256 for keystream generation
 - **hmac**: HMAC-SHA256 authentication
-- **rand**: Random IV generation
+- **rand**: Random nonce/IV generation
 - **rfd**: File selection dialog
 - **image**: Image loading for UI
 - **chrono**: Timestamps for logging
 - **rodio**: Background music playback (minimp3 decoder)
+- **argon2**: Password hashing (Argon2id key derivation)
+- **chacha20**: Cipher crate (reserved for future enhancements)
+
+---
+
+## Security Improvements (v0.2.0+)
+
+- **Key Derivation**: Argon2id instead of raw SHA-256 (memory-hard, GPU-resistant)
+- **Counter Mode**: CTR instead of ECB (no patterns in ciphertext)
+- **Authenticated Encryption**: HMAC authenticates nonce + IV + ciphertext
+- **Nonce Anti-Replay**: 16-byte unique nonce per file
+- **PKCS#7 Padding**: Always at least 1 block of padding
+
+---
+
+## Changelog
+
+### v0.2.0 (2026-05-25)
+- **Security**: Replaced ECB with CTR mode
+- **Key Derivation**: SHA-256 → Argon2id
+- **Authentication**: HMAC now authenticates nonce + IV + ciphertext
+- **Anti-Replay**: 16-byte nonce per encryption
+- **Padding**: PKCS#7 standard (always at least 1 block)
+- **Performance**: Superpermutation cached with OnceLock
+
+### v0.1.0
+- Initial release with ECB-mode permutation cipher
 
 ---
 
