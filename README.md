@@ -87,15 +87,16 @@ Security is based on two computationally hard problems:
 ### File Format
 
 ```
-[16 bytes: nonce][1 byte: ext_len][N bytes: extension][16 bytes: IV][encrypted data][32 bytes: HMAC-SHA256]
+[16 bytes: nonce][16 bytes: salt][1 byte: ext_len][N bytes: extension][16 bytes: IV][encrypted data][32 bytes: HMAC-SHA256]
 ```
 
 - **nonce**: Unique 16-byte value per file (anti-replay)
+- **salt**: Unique 16-byte random salt per file (key derivation)
 - **ext_len**: Length of original file extension
 - **extension**: Original file extension
 - **IV**: Initialization vector (authenticated in HMAC)
 - **encrypted data**: Ciphertext in CTR mode
-- **HMAC**: Authenticates nonce + ext_len + extension + IV + ciphertext
+- **HMAC**: Authenticates salt + nonce + ext_len + extension + IV + ciphertext
 
 ---
 
@@ -206,7 +207,8 @@ Inspired by **MikuMikuBeam**, HaruhiCrypt features a cute and functional interfa
 - **egui/eframe**: Portable GUI (OpenGL)
 - **sha2**: SHA-256 for keystream generation
 - **hmac**: HMAC-SHA256 authentication
-- **rand**: Random nonce/IV generation
+- **subtle**: Constant-time cryptography operations
+- **rand**: Random nonce/IV/salt generation
 - **rfd**: File selection dialog
 - **image**: Image loading for UI
 - **chrono**: Timestamps for logging
@@ -220,13 +222,22 @@ Inspired by **MikuMikuBeam**, HaruhiCrypt features a cute and functional interfa
 
 - **Key Derivation**: Argon2id instead of raw SHA-256 (memory-hard, GPU-resistant)
 - **Counter Mode**: CTR instead of ECB (no patterns in ciphertext)
-- **Authenticated Encryption**: HMAC authenticates nonce + IV + ciphertext
+- **Authenticated Encryption**: HMAC authenticates salt + nonce + IV + ciphertext
 - **Nonce Anti-Replay**: 16-byte unique nonce per file
+- **Per-File Salt**: Unique 16-byte random salt per file (not hardcoded)
+- **Constant-Time MAC**: Timing-safe comparison to prevent timing attacks
 - **PKCS#7 Padding**: Always at least 1 block of padding
 
 ---
 
 ## Changelog
+
+### v0.3.0 (2026-05-25)
+- **Security Fix**: Per-file random salt (16 bytes) instead of hardcoded salt
+- **Security Fix**: HMAC now includes salt in authentication
+- **Security Fix**: Constant-time MAC comparison to prevent timing attacks
+- **Security Fix**: Validate all header offsets before slicing to prevent DoS
+- **Breaking Change**: New file format with 16-byte salt field
 
 ### v0.2.0 (2026-05-25)
 - **Security**: Replaced ECB with CTR mode
