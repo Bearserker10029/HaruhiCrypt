@@ -2,6 +2,7 @@ use sha2::{Sha256, Digest};
 use hmac::Mac;
 use rand::RngCore;
 use argon2::{Argon2, PasswordHasher, password_hash::SaltString};
+use subtle::ConstantTimeEq;
 use std::sync::OnceLock;
 
 pub const BLOCK_SIZE: usize = 8;
@@ -9,8 +10,7 @@ pub const NONCE_SIZE: usize = 16;
 pub const IV_SIZE: usize = 16;
 pub const KEY_SIZE: usize = 32;
 pub const MAC_SIZE: usize = 32;
-
-const ARGON2_SALT: &str = "HaruhiCrypt_v2____";
+pub const SALT_SIZE: usize = 16;
 
 static PERMUTATIONS: OnceLock<Vec<[u8; BLOCK_SIZE]>> = OnceLock::new();
 
@@ -21,10 +21,10 @@ pub struct HaruhiCipher {
 }
 
 impl HaruhiCipher {
-    pub fn new(key: &str, nonce: [u8; NONCE_SIZE]) -> Self {
-        let salt = SaltString::encode_b64(ARGON2_SALT.as_bytes()).expect("Salt encoding failed");
+    pub fn new(key: &str, nonce: [u8; NONCE_SIZE], salt: &[u8; SALT_SIZE]) -> Self {
+        let salt_str = SaltString::encode_b64(salt).expect("Salt encoding failed");
         let argon2 = Argon2::default();
-        let hash = argon2.hash_password(key.as_bytes(), &salt).expect("Argon2 failed");
+        let hash = argon2.hash_password(key.as_bytes(), &salt_str).expect("Argon2 failed");
         let hash_output = hash.hash.expect("Argon2 no hash");
         let seed: [u8; KEY_SIZE] = hash_output.as_bytes()[0..KEY_SIZE].try_into().unwrap();
 
@@ -195,6 +195,7 @@ fn extract_all_permutations(superperm: &[u8]) -> Vec<[u8; BLOCK_SIZE]> {
 #[derive(Debug)]
 pub struct EncryptedFile {
     pub nonce: [u8; NONCE_SIZE],
+    pub salt: [u8; SALT_SIZE],
     pub iv: [u8; IV_SIZE],
     pub ext_len: u8,
     pub ext: Vec<u8>,
@@ -206,6 +207,7 @@ impl EncryptedFile {
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut result = Vec::new();
         result.extend_from_slice(&self.nonce);
+        result.extend_from_slice(&self.salt);
         result.push(self.ext_len);
         result.extend_from_slice(&self.ext);
         result.extend_from_slice(&self.iv);
@@ -215,37 +217,50 @@ impl EncryptedFile {
     }
 
     pub fn from_bytes(data: &[u8]) -> Result<Self, String> {
-        if data.len() < NONCE_SIZE + 1 + 16 + 32 {
+        let min_len = NONCE_SIZE + SALT_SIZE + 1 + IV_SIZE + MAC_SIZE;
+        if data.len() < min_len {
             return Err("Data too short".to_string());
         }
 
         let nonce = data[0..NONCE_SIZE].try_into().unwrap();
-        let ext_len = data[NONCE_SIZE] as usize;
-        let ext_start = NONCE_SIZE + 1;
+        let salt = data[NONCE_SIZE..NONCE_SIZE + SALT_SIZE].try_into().unwrap();
+        let ext_len = data[NONCE_SIZE + SALT_SIZE] as usize;
+        let ext_start = NONCE_SIZE + SALT_SIZE + 1;
         let ext_end = ext_start + ext_len;
         let iv_start = ext_end;
         let iv_end = iv_start + IV_SIZE;
+        let ciphertext_start = iv_end;
         let ciphertext_end = data.len() - MAC_SIZE;
+
+        if ext_len > 255 {
+            return Err("Invalid ext_len".to_string());
+        }
 
         if data.len() < iv_end {
             return Err("Data too short for IV".to_string());
         }
 
+        if ciphertext_end < ciphertext_start {
+            return Err("Invalid ciphertext length".to_string());
+        }
+
         let ext = data[ext_start..ext_end].to_vec();
         let iv: [u8; IV_SIZE] = data[iv_start..iv_end].try_into().unwrap();
-        let ciphertext = data[iv_end..ciphertext_end].to_vec();
+        let ciphertext = data[ciphertext_start..ciphertext_end].to_vec();
         let mac: [u8; MAC_SIZE] = data[ciphertext_end..].try_into().unwrap();
 
-        Ok(Self { nonce, iv, ext_len: ext_len as u8, ext, ciphertext, mac })
+        Ok(Self { nonce, salt, iv, ext_len: ext_len as u8, ext, ciphertext, mac })
     }
 }
 
 pub fn encrypt_data(key: &str, data: &[u8], original_ext: Option<&str>) -> Vec<u8> {
     let mut rng = rand::thread_rng();
     let mut nonce = [0u8; NONCE_SIZE];
+    let mut salt = [0u8; SALT_SIZE];
     rng.fill_bytes(&mut nonce);
+    rng.fill_bytes(&mut salt);
 
-    let cipher = HaruhiCipher::new(key, nonce);
+    let cipher = HaruhiCipher::new(key, nonce, &salt);
 
     let ext_bytes = original_ext.unwrap_or("bin").as_bytes();
     let ext_len = ext_bytes.len().min(255) as u8;
@@ -270,6 +285,7 @@ pub fn encrypt_data(key: &str, data: &[u8], original_ext: Option<&str>) -> Vec<u
 
     let mut file = EncryptedFile {
         nonce,
+        salt,
         iv: [0u8; IV_SIZE],
         ext_len,
         ext: ext_bytes.to_vec(),
@@ -278,6 +294,7 @@ pub fn encrypt_data(key: &str, data: &[u8], original_ext: Option<&str>) -> Vec<u
     };
 
     let mut hasher = hmac::Hmac::<sha2::Sha256>::new_from_slice(&cipher.seed).expect("HMAC init failed");
+    hasher.update(&salt);
     hasher.update(&nonce);
     hasher.update(&[ext_len]);
     hasher.update(&file.ext);
@@ -293,9 +310,10 @@ pub fn encrypt_data(key: &str, data: &[u8], original_ext: Option<&str>) -> Vec<u
 pub fn decrypt_data(key: &str, data: &[u8]) -> Result<(Vec<u8>, String), String> {
     let file = EncryptedFile::from_bytes(data)?;
 
-    let cipher = HaruhiCipher::new(key, file.nonce);
+    let cipher = HaruhiCipher::new(key, file.nonce, &file.salt);
 
     let mut mac_data = Vec::new();
+    mac_data.extend_from_slice(&file.salt);
     mac_data.extend_from_slice(&file.nonce);
     mac_data.push(file.ext_len);
     mac_data.extend_from_slice(&file.ext);
@@ -306,7 +324,8 @@ pub fn decrypt_data(key: &str, data: &[u8]) -> Result<(Vec<u8>, String), String>
     hasher.update(&mac_data);
     let computed_mac = hasher.finalize().into_bytes();
 
-    if computed_mac.as_slice() != file.mac.as_slice() {
+    if computed_mac.as_slice().ct_eq(file.mac.as_slice()).into() {
+    } else {
         return Err("Authentication failed: invalid key or corrupted data".to_string());
     }
 
@@ -397,7 +416,8 @@ mod tests {
     fn test_block_cipher_inverse() {
         let key = "0123-4567-89ab-cdef";
         let nonce = [0u8; NONCE_SIZE];
-        let cipher = HaruhiCipher::new(key, nonce);
+        let salt = [0u8; SALT_SIZE];
+        let cipher = HaruhiCipher::new(key, nonce, &salt);
 
         for block_index in 0..100 {
             let block: [u8; 8] = rand::random();
@@ -427,5 +447,76 @@ mod tests {
 
         let result = decrypt_data("wrong_key", &encrypted);
         assert!(result.is_err(), "Should reject wrong key");
+    }
+
+    #[test]
+    fn test_same_key_different_files_different_salt() {
+        let key = "test_key";
+        let data1 = b"File 1 content";
+        let data2 = b"File 2 content";
+
+        let enc1 = encrypt_data(key, data1, Some("txt"));
+        let enc2 = encrypt_data(key, data2, Some("txt"));
+
+        let file1 = EncryptedFile::from_bytes(&enc1).unwrap();
+        let file2 = EncryptedFile::from_bytes(&enc2).unwrap();
+
+        assert_ne!(file1.salt, file2.salt, "Different files should have different salts");
+        assert_ne!(file1.ciphertext, file2.ciphertext, "Different files should have different ciphertexts");
+    }
+
+    #[test]
+    fn test_salt_in_mac() {
+        let key = "test_key";
+        let data = b"Test data";
+
+        let mut encrypted = encrypt_data(key, data, Some("txt"));
+        let _file = EncryptedFile::from_bytes(&encrypted).unwrap();
+
+        let salt_idx = NONCE_SIZE;
+        encrypted[salt_idx] ^= 0xFF;
+
+        let result = decrypt_data(key, &encrypted);
+        assert!(result.is_err(), "Modified salt should cause MAC failure");
+    }
+
+    #[test]
+    fn test_ext_len_overflow() {
+        let key = "test_key";
+        let data = b"Test data";
+        let encrypted = encrypt_data(key, data, Some("txt"));
+
+        let mut corrupted = encrypted.clone();
+        let ext_len_idx = NONCE_SIZE + SALT_SIZE;
+        corrupted[ext_len_idx] = 255;
+
+        let result = decrypt_data(key, &corrupted);
+        assert!(result.is_err(), "Should reject malformed data with ext_len overflow");
+    }
+
+    #[test]
+    fn test_truncated_data() {
+        let key = "test_key";
+        let data = b"Test data";
+        let encrypted = encrypt_data(key, data, Some("txt"));
+
+        let truncated = &encrypted[..encrypted.len() / 2];
+        let result = decrypt_data(key, truncated);
+        assert!(result.is_err(), "Should reject truncated data");
+    }
+
+    #[test]
+    fn test_valid_header_minimal_ext() {
+        let key = "test_key";
+        let data = b"Test";
+        let encrypted = encrypt_data(key, data, Some(""));
+
+        let file = EncryptedFile::from_bytes(&encrypted).unwrap();
+        assert_eq!(file.ext.len(), 0);
+        assert_eq!(file.ext_len, 0);
+
+        let (decrypted, ext) = decrypt_data(key, &encrypted).unwrap();
+        assert_eq!(decrypted, data);
+        assert_eq!(ext, "");
     }
 }

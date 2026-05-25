@@ -1,6 +1,6 @@
 [package]
 name = "haruhi-crypt"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 description = "HaruhiCrypt v2 - Encryption using the Haruhi Problem (Superpermutations)"
 license = "MIT"
@@ -20,6 +20,7 @@ winapi = { version = "0.3", features = ["winuser", "windef", "wingdi", "combasea
 rodio = { version = "0.19", default-features = false, features = ["minimp3"] }
 argon2 = "0.5"
 chacha20 = "0.9"
+subtle = "2.4"
 
 [dependencies.egui]
 version = "0.25"
