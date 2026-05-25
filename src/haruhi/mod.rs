@@ -7,7 +7,6 @@ use std::sync::OnceLock;
 
 pub const BLOCK_SIZE: usize = 8;
 pub const NONCE_SIZE: usize = 16;
-pub const IV_SIZE: usize = 16;
 pub const KEY_SIZE: usize = 32;
 pub const MAC_SIZE: usize = 32;
 pub const SALT_SIZE: usize = 16;
@@ -16,29 +15,32 @@ static PERMUTATIONS: OnceLock<Vec<[u8; BLOCK_SIZE]>> = OnceLock::new();
 
 pub struct HaruhiCipher {
     permutations: Vec<[u8; BLOCK_SIZE]>,
-    seed: [u8; KEY_SIZE],
+    enc_key: [u8; KEY_SIZE],
     nonce: [u8; NONCE_SIZE],
 }
 
 impl HaruhiCipher {
-    pub fn new(key: &str, nonce: [u8; NONCE_SIZE], salt: &[u8; SALT_SIZE]) -> Self {
-        let salt_str = SaltString::encode_b64(salt).expect("Salt encoding failed");
-        let argon2 = Argon2::default();
-        let hash = argon2.hash_password(key.as_bytes(), &salt_str).expect("Argon2 failed");
-        let hash_output = hash.hash.expect("Argon2 no hash");
-        let seed: [u8; KEY_SIZE] = hash_output.as_bytes()[0..KEY_SIZE].try_into().unwrap();
-
+    pub fn with_enc_key(enc_key: [u8; KEY_SIZE], nonce: [u8; NONCE_SIZE]) -> Self {
         let permutations = PERMUTATIONS.get_or_init(|| {
             let superperm = generate_superpermutation(8);
             extract_all_permutations(&superperm)
         }).clone();
 
-        Self { permutations, seed, nonce }
+        Self { permutations, enc_key, nonce }
+    }
+
+    pub fn new(key: &str, nonce: [u8; NONCE_SIZE], salt: &[u8; SALT_SIZE]) -> Self {
+        let salt_str = SaltString::encode_b64(salt).expect("Salt encoding failed");
+        let argon2 = Argon2::default();
+        let hash = argon2.hash_password(key.as_bytes(), &salt_str).expect("Argon2 failed");
+        let hash_output = hash.hash.expect("Argon2 no hash");
+        let enc_key: [u8; KEY_SIZE] = hash_output.as_bytes()[0..KEY_SIZE].try_into().unwrap();
+        Self::with_enc_key(enc_key, nonce)
     }
 
     fn get_keystream_block(&self, block_index: u64) -> [u8; BLOCK_SIZE] {
         let mut hasher = Sha256::new();
-        hasher.update(&self.seed);
+        hasher.update(&self.enc_key);
         hasher.update(&self.nonce);
         hasher.update(&block_index.to_le_bytes());
         let hash = hasher.finalize();
@@ -49,7 +51,7 @@ impl HaruhiCipher {
 
         let mut result = [0u8; BLOCK_SIZE];
         for i in 0..BLOCK_SIZE {
-            result[perm[i] as usize] = hash[i];
+            result[perm[i] as usize] = hash[8 + i];
         }
         result
     }
@@ -196,7 +198,6 @@ fn extract_all_permutations(superperm: &[u8]) -> Vec<[u8; BLOCK_SIZE]> {
 pub struct EncryptedFile {
     pub nonce: [u8; NONCE_SIZE],
     pub salt: [u8; SALT_SIZE],
-    pub iv: [u8; IV_SIZE],
     pub ext_len: u8,
     pub ext: Vec<u8>,
     pub ciphertext: Vec<u8>,
@@ -210,14 +211,13 @@ impl EncryptedFile {
         result.extend_from_slice(&self.salt);
         result.push(self.ext_len);
         result.extend_from_slice(&self.ext);
-        result.extend_from_slice(&self.iv);
         result.extend_from_slice(&self.ciphertext);
         result.extend_from_slice(&self.mac);
         result
     }
 
     pub fn from_bytes(data: &[u8]) -> Result<Self, String> {
-        let min_len = NONCE_SIZE + SALT_SIZE + 1 + IV_SIZE + MAC_SIZE;
+        let min_len = NONCE_SIZE + SALT_SIZE + 1 + MAC_SIZE;
         if data.len() < min_len {
             return Err("Data too short".to_string());
         }
@@ -227,17 +227,15 @@ impl EncryptedFile {
         let ext_len = data[NONCE_SIZE + SALT_SIZE] as usize;
         let ext_start = NONCE_SIZE + SALT_SIZE + 1;
         let ext_end = ext_start + ext_len;
-        let iv_start = ext_end;
-        let iv_end = iv_start + IV_SIZE;
-        let ciphertext_start = iv_end;
+        let ciphertext_start = ext_end;
         let ciphertext_end = data.len() - MAC_SIZE;
 
         if ext_len > 255 {
             return Err("Invalid ext_len".to_string());
         }
 
-        if data.len() < iv_end {
-            return Err("Data too short for IV".to_string());
+        if data.len() < ext_end {
+            return Err("Data too short for extension".to_string());
         }
 
         if ciphertext_end < ciphertext_start {
@@ -245,11 +243,10 @@ impl EncryptedFile {
         }
 
         let ext = data[ext_start..ext_end].to_vec();
-        let iv: [u8; IV_SIZE] = data[iv_start..iv_end].try_into().unwrap();
         let ciphertext = data[ciphertext_start..ciphertext_end].to_vec();
         let mac: [u8; MAC_SIZE] = data[ciphertext_end..].try_into().unwrap();
 
-        Ok(Self { nonce, salt, iv, ext_len: ext_len as u8, ext, ciphertext, mac })
+        Ok(Self { nonce, salt, ext_len: ext_len as u8, ext, ciphertext, mac })
     }
 }
 
@@ -260,7 +257,18 @@ pub fn encrypt_data(key: &str, data: &[u8], original_ext: Option<&str>) -> Vec<u
     rng.fill_bytes(&mut nonce);
     rng.fill_bytes(&mut salt);
 
-    let cipher = HaruhiCipher::new(key, nonce, &salt);
+    let salt_str = SaltString::encode_b64(&salt).expect("Salt encoding failed");
+    let argon2 = Argon2::default();
+    let hash = argon2.hash_password(key.as_bytes(), &salt_str).expect("Argon2 failed");
+    let hash_output = hash.hash.expect("Argon2 no hash");
+    let enc_key: [u8; KEY_SIZE] = hash_output.as_bytes()[0..KEY_SIZE].try_into().unwrap();
+
+    let mut mac_key_hasher = Sha256::new();
+    mac_key_hasher.update(b"HaruhiCrypt_v3_mac");
+    mac_key_hasher.update(&enc_key);
+    let mac_key: [u8; KEY_SIZE] = mac_key_hasher.finalize().into();
+
+    let cipher = HaruhiCipher::with_enc_key(enc_key, nonce);
 
     let ext_bytes = original_ext.unwrap_or("bin").as_bytes();
     let ext_len = ext_bytes.len().min(255) as u8;
@@ -286,19 +294,17 @@ pub fn encrypt_data(key: &str, data: &[u8], original_ext: Option<&str>) -> Vec<u
     let mut file = EncryptedFile {
         nonce,
         salt,
-        iv: [0u8; IV_SIZE],
         ext_len,
         ext: ext_bytes.to_vec(),
         ciphertext,
         mac: [0u8; MAC_SIZE],
     };
 
-    let mut hasher = hmac::Hmac::<sha2::Sha256>::new_from_slice(&cipher.seed).expect("HMAC init failed");
+    let mut hasher = hmac::Hmac::<sha2::Sha256>::new_from_slice(&mac_key).expect("HMAC init failed");
     hasher.update(&salt);
     hasher.update(&nonce);
     hasher.update(&[ext_len]);
     hasher.update(&file.ext);
-    hasher.update(&file.iv);
     hasher.update(&file.ciphertext);
     let mac: [u8; MAC_SIZE] = hasher.finalize().into_bytes().into();
 
@@ -310,17 +316,27 @@ pub fn encrypt_data(key: &str, data: &[u8], original_ext: Option<&str>) -> Vec<u
 pub fn decrypt_data(key: &str, data: &[u8]) -> Result<(Vec<u8>, String), String> {
     let file = EncryptedFile::from_bytes(data)?;
 
-    let cipher = HaruhiCipher::new(key, file.nonce, &file.salt);
+    let salt_str = SaltString::encode_b64(&file.salt).expect("Salt encoding failed");
+    let argon2 = Argon2::default();
+    let hash = argon2.hash_password(key.as_bytes(), &salt_str).expect("Argon2 failed");
+    let hash_output = hash.hash.expect("Argon2 no hash");
+    let enc_key: [u8; KEY_SIZE] = hash_output.as_bytes()[0..KEY_SIZE].try_into().unwrap();
+
+    let mut mac_key_hasher = Sha256::new();
+    mac_key_hasher.update(b"HaruhiCrypt_v3_mac");
+    mac_key_hasher.update(&enc_key);
+    let mac_key: [u8; KEY_SIZE] = mac_key_hasher.finalize().into();
+
+    let cipher = HaruhiCipher::with_enc_key(enc_key, file.nonce);
 
     let mut mac_data = Vec::new();
     mac_data.extend_from_slice(&file.salt);
     mac_data.extend_from_slice(&file.nonce);
     mac_data.push(file.ext_len);
     mac_data.extend_from_slice(&file.ext);
-    mac_data.extend_from_slice(&file.iv);
     mac_data.extend_from_slice(&file.ciphertext);
 
-    let mut hasher = hmac::Hmac::<sha2::Sha256>::new_from_slice(&cipher.seed).expect("HMAC init failed");
+    let mut hasher = hmac::Hmac::<sha2::Sha256>::new_from_slice(&mac_key).expect("HMAC init failed");
     hasher.update(&mac_data);
     let computed_mac = hasher.finalize().into_bytes();
 

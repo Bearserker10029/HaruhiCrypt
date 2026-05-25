@@ -79,16 +79,15 @@ Security is based on two computationally hard problems:
 ### File Format
 
 ```
-[16 bytes: nonce][16 bytes: salt][1 byte: ext_len][N bytes: extension][16 bytes: IV][encrypted data][32 bytes: HMAC-SHA256]
+[16 bytes: nonce][16 bytes: salt][1 byte: ext_len][N bytes: extension][encrypted data][32 bytes: HMAC-SHA256]
 ```
 
 - **nonce**: Unique 16-byte value per file (anti-replay)
 - **salt**: Unique 16-byte random salt per file (key derivation)
 - **ext_len**: Length of original file extension
 - **extension**: Original file extension
-- **IV**: Initialization vector (authenticated in HMAC)
 - **encrypted data**: Ciphertext in CTR mode
-- **HMAC**: Authenticates salt + nonce + ext_len + extension + IV + ciphertext
+- **HMAC**: Authenticates salt + nonce + ext_len + extension + ciphertext
 
 ---
 
@@ -183,7 +182,7 @@ Inspired by **MikuMikuBeam**, HaruhiCrypt features a cute and functional interfa
 - **sha2**: SHA-256 for keystream generation
 - **hmac**: HMAC-SHA256 authentication
 - **subtle**: Constant-time cryptography operations
-- **rand**: Random nonce/IV/salt generation
+- **rand**: Random nonce/salt generation
 - **rfd**: File selection dialog
 - **image**: Image loading for UI
 - **chrono**: Timestamps for logging
@@ -195,11 +194,13 @@ Inspired by **MikuMikuBeam**, HaruhiCrypt features a cute and functional interfa
 ## Security Improvements (v0.2.0+)
 
 - **Key Derivation**: Argon2id instead of raw SHA-256 (memory-hard, GPU-resistant)
+- **Key Separation**: Separate keys for encryption and HMAC (64 bytes derived)
 - **Counter Mode**: CTR instead of ECB (no patterns in ciphertext)
-- **Authenticated Encryption**: HMAC authenticates salt + nonce + IV + ciphertext
+- **Authenticated Encryption**: HMAC authenticates salt + nonce + ciphertext
 - **Nonce Anti-Replay**: 16-byte unique nonce per file
 - **Per-File Salt**: Unique 16-byte random salt per file (not hardcoded)
 - **Constant-Time MAC**: Timing-safe comparison to prevent timing attacks
+- **Unbiased Keystream**: Uses independent hash bytes for permutation selection and data
 - **PKCS#7 Padding**: Always at least 1 block of padding
 
 ---
@@ -211,7 +212,10 @@ Inspired by **MikuMikuBeam**, HaruhiCrypt features a cute and functional interfa
 - **Security Fix**: HMAC now includes salt in authentication
 - **Security Fix**: Constant-time MAC comparison to prevent timing attacks
 - **Security Fix**: Validate all header offsets before slicing to prevent DoS
-- **Breaking Change**: New file format with 16-byte salt field
+- **Security Fix**: Fixed keystream bias (uses independent hash bytes for permutation and data)
+- **Security Fix**: Separate keys for encryption and HMAC (64 bytes derived from Argon2)
+- **Cleanup**: Removed unused IV field from file format
+- **Breaking Change**: New file format (no IV, includes salt)
 
 ### v0.2.0 (2026-05-25)
 - **Security**: Replaced ECB with CTR mode
