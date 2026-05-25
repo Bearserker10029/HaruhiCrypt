@@ -494,7 +494,7 @@ impl eframe::App for HaruhiCryptApp {
             ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
                 ui.add_space(5.0);
                 ui.separator();
-                ui.label(egui::RichText::new("HaruhiCrypt v0.2.0").weak());
+                ui.label(egui::RichText::new("HaruhiCrypt v0.3.0").weak());
             });
         });
     }
